@@ -25,7 +25,7 @@ jobs:
       run: gradle build
 
     - name: Upload Artifact (.jar)
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Korkumod-JAR
         path: build/libs/*.jar
