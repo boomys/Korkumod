@@ -1,10 +1,14 @@
 plugins {
-    id 'fabric-loom' version '1.5-SNAPSHOT'
+    id 'fabric-loom' version '1.5.7'
     id 'java'
 }
 
 version = '1.0.0'
 group = 'com.korkumod'
+
+base {
+    archivesName = 'korkumod'
+}
 
 repositories {
     mavenCentral()
@@ -16,6 +20,10 @@ dependencies {
     mappings "net.fabricmc:yarn:1.20.4+build.3:v2"
     modImplementation "net.fabricmc:fabric-loader:0.15.11"
     modImplementation "net.fabricmc.fabric-api:fabric-api:0.97.2+1.20.4"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
 }
 
 java {
