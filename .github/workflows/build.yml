@@ -28,3 +28,4 @@ jobs:
                                                                                                                               name: Korkumod-Jar
                                                                                                                                         path: build/libs/*.jar
                                                                                                                                         
+                                                                                                                                        
