@@ -12,11 +12,19 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - name: Make Gradle executable
-        run: chmod +x gradlew
+        run: find . -name "gradlew" -exec chmod +x {} +
       - name: Build with Gradle
-        run: ./gradlew build
+        run: |
+          GRADLE_WRAPPUP=$(find . -name "gradlew" -print -quit)
+          if [ -n "$GRADLE_WRAPPUP" ]; then
+            DIR=$(dirname "$GRADLE_WRAPPUP")
+            cd "$DIR" && ./gradlew build
+          else
+            echo "gradlew bulunamadı!"
+            exit 1
+          fi
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Korkumod-Jar
-          path: build/libs/*.jar
+          path: '**/build/libs/*.jar'
