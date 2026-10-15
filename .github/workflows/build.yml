@@ -18,8 +18,10 @@ jobs:
         java-version: '21'
         distribution: 'temurin'
 
-    - name: Setup Gradle
+    - name: Setup Gradle 8.5
       uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.5'
 
     - name: Build with Gradle
       run: gradle build
@@ -27,5 +29,5 @@ jobs:
     - name: Upload Artifact (.jar)
       uses: actions/upload-artifact@v4
       with:
-        name: Korkumod-1.21.5-JAR
+        name: Korkumod-JAR
         path: build/libs/*.jar
