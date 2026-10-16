@@ -1,17 +1,8 @@
-plugins {
-    id 'fabric-loom' version '1.8-SNAPSHOT'
-    id 'maven-publish'
-}
-
 version = project.mod_version
 group = project.maven_group
 
-base {
-    archivesName = project.archives_base_name
-}
-
 repositories {
-    mavenCentral()
+    // Gerekli depolar
 }
 
 dependencies {
@@ -19,12 +10,6 @@ dependencies {
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     
-    // 1.21.2 için Fabric API sürümü
-    modImplementation "net.fabricmc.fabric-api:fabric-api:0.104.0+1.21.2"
-}
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
+    // Fabric API bağımlılığı
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 }
