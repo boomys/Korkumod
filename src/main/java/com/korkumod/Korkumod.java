@@ -16,30 +16,24 @@ public class KorkuMod implements ModInitializer {
     public static final String MOD_ID = "korkumod";
     public static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
-    // Lanetli Tabela İtemi (Fabric 1.21.5 Identifier kullanımı)
     public static final Item CURSED_SIGN_ITEM = Registry.register(
             Registries.ITEM,
             Identifier.of(MOD_ID, "cursed_sign"),
-            new Item(new Item.Settings().maxCount(1))
+            new Item(new Item.Settings())
     );
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KorkuMod 1.21.5 yukleniyor... Kabus basliyor.");
+        LOGGER.info("KorkuMod yukleniyor...");
 
-        // Tabelayı Fonksiyonel Eşyalar sekmesine ekle
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).content(entries -> entries.add(CURSED_SIGN_ITEM));
 
-        // Chat Dinleyicisi (Varlığın cevabı ve Steve komutları)
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String playerText = message.getContent().getString().toLowerCase();
             
-            // Eğer oyuncu Steve'i çağırırsa
             if (playerText.contains("steve come here")) {
-                sender.sendMessage(Text.literal("§e[Steve]: Geliyorum kanka, beni bekle!"), false);
-                // Burada Steve'i oyuncunun yanına ışınlama mantığı tetiklenecek
+                sender.sendMessage(Text.literal("§e[Steve]: Geliyorum kanka!"), false);
             } else {
-                // Diğer her yazıda stalker varlığın efsanevi cevabı:
                 sender.getServer().getPlayerManager().broadcast(
                         Text.literal("§4[Varlık]: Hee çağrımı o mal köpek"), 
                         false
