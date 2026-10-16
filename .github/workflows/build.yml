@@ -13,6 +13,8 @@ jobs:
           distribution: 'temurin'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.8'
       - name: Build with Gradle
         run: gradle build
       - name: Upload Artifact
