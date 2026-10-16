@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "korkumod",
-  "version": "${version}",
+  "version": "1.0.0",
   "name": "KorkuMod",
-  "description": "Korku temali Fabric modu.",
+  "description": "Korku temalı özel Minecraft modu",
   "authors": [
-    "Boomy"
+    "Kanka"
   ],
   "contact": {},
   "license": "MIT",
@@ -13,15 +13,15 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "com.korkumod.KorkuMod"
+      "net.korkumod.KorkuMod"
     ]
   },
   "mixins": [
     "korkumod.mixins.json"
   ],
   "depends": {
-    "fabricloader": ">=0.16.0",
-    "minecraft": "~1.21.2",
+    "fabricloader": ">=0.15.0",
+    "minecraft": ">=1.21.2",
     "java": ">=21",
     "fabric-api": "*"
   }
