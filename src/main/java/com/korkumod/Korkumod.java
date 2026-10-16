@@ -17,12 +17,16 @@ public class KorkuMod implements ModInitializer {
     public static final Item CURSED_SIGN_ITEM = Registry.register(
             Registries.ITEM,
             Identifier.of(MOD_ID, "cursed_sign"),
-            new Item(new Item.Settings().maxCount(1))
+            new Item(new Item.Settings())
     );
 
     @Override
     public void onInitialize() {
         LOGGER.info("KorkuMod 1.21.5 basariyla baslatildi.");
-        ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).content(entries -> entries.add(CURSED_SIGN_ITEM));
+        
+        // Fabric 1.21.5 için doğru item grup ekleme yöntemi (.accept kullanıyoruz)
+        ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).register(content -> {
+            content.add(CURSED_SIGN_ITEM);
+        });
     }
 }
