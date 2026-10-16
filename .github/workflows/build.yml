@@ -1,16 +1,19 @@
-name: build
+name: Build KorkuMod
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: set up JDK 21
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
@@ -20,4 +23,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Build with Gradle
-        run: gradle build
+        run: ./gradlew build
+
+      - name: Upload Mod Jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: korkumod-jar
+          path: build/libs/*.jar
