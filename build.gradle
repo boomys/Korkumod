@@ -1,45 +1,22 @@
-plugins {
-    id 'fabric-loom' version '1.6-SNAPSHOT'
-    id 'maven-publish'
-}
+name: Build Minecraft Mod
 
-version = project.mod_version
-group = project.maven_group
+on: [push, pull_request]
 
-base {
-    archivesName = project.archives_base_name
-}
-
-repositories {
-    // Add repositories here if needed
-}
-
-dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings "net.fabricmc:yarn:${project.mappings}:v2"
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-}
-
-processResources {
-    inputs.property "version", project.version
-
-    filesMatching("fabric.mod.json") {
-        expand "version": project.version
-    }
-}
-
-tasks.withType(JavaCompile).configureEach {
-    it.options.release = 21
-}
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-    withSourcesJar()
-}
-
-jar {
-    from("LICENSE") {
-        rename { "${it}_${project.archivesName}"}
-    }
-}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+      - name: Build with Gradle
+        run: gradle build
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Korkumod-Jar
+          path: build/libs/*.jar
