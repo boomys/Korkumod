@@ -25,7 +25,7 @@ jobs:
           gradle-version: '8.8'
 
       - name: Build with Gradle
-        run: ./gradlew build
+        run: gradle build
 
       - name: Upload Mod Jar
         uses: actions/upload-artifact@v4
