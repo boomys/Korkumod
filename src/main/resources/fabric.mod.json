@@ -1,25 +1,6 @@
-{
-  "schemaVersion": 1,
-  "id": "korkumod",
-  "version": "1.0.0",
-  "name": "Korku Mod",
-  "description": "Fabric 1.21.5 Psikolojik Korku Modu",
-  "authors": ["Sen"],
-  "contact": {},
-  "license": "MIT",
-  "environment": "client-server",
-  "entrypoints": {
-    "main": [
-      "com.korkumod.KorkuMod"
-    ]
-  },
-  "mixins": [
-    "korkumod.mixins.json"
-  ],
-  "depends": {
+"depends": {
     "fabricloader": ">=0.16.0",
-    "minecraft": "1.21.5",
-    "java": "21",
+    "minecraft": "~1.21.2",
+    "java": ">=21",
     "fabric-api": "*"
-  }
 }
