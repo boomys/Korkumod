@@ -10,7 +10,7 @@ import net.minecraft.util.Identifier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-public class KorkuMod implements ModInitializer {
+public class Korkumod implements ModInitializer {
     public static final String MOD_ID = "korkumod";
     public static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
@@ -24,7 +24,6 @@ public class KorkuMod implements ModInitializer {
     public void onInitialize() {
         LOGGER.info("KorkuMod 1.21.5 basariyla baslatildi!");
 
-        // Lanetli tabelayı eşya sekmesine ekle
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).content(entries -> entries.add(CURSED_SIGN_ITEM));
     }
 }
