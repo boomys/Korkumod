@@ -2,18 +2,25 @@
   "schemaVersion": 1,
   "id": "korkumod",
   "version": "1.0.0",
-  "name": "Korkumod",
-  "description": "Minecraft Korku Modu",
-  "authors": ["boomys"],
+  "name": "Korku Mod",
+  "description": "Fabric 1.21.5 Psikolojik Korku ve Steve Modu",
+  "authors": ["Sen"],
+  "contact": {},
   "license": "MIT",
-  "environment": "*",
+  "environment": "client-server",
   "entrypoints": {
     "main": [
-      "com.korkumod.Korkumod"
+      "com.korkumod.KorkuMod"
     ]
   },
+  "mixins": [
+    "korkumod.mixins.json"
+  ],
   "depends": {
-    "fabricloader": ">=0.15.6",
-    "minecraft": "~1.20.4"
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.5",
+    "java": "21",
+    "fabric-api": "*"
   }
 }
+
