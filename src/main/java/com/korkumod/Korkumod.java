@@ -22,7 +22,7 @@ public class KorkuMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KorkuMod 1.21.5 basariyla yuklendi.");
+        LOGGER.info("KorkuMod 1.21.5 basariyla baslatildi.");
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).content(entries -> entries.add(CURSED_SIGN_ITEM));
     }
 }
