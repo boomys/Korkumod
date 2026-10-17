@@ -34,7 +34,7 @@ public class KorkuMod implements ModInitializer {
     public static final Logger LOGGER = LogManager.getLogger(MOD_ID);
     private static final Random RANDOM = new Random();
 
-    // 1. Lanetli Tabela (Cursed Sign) Eşyası
+    // Lanetli Tabela Eşyası
     public static final Item CURSED_SIGN_ITEM = Registry.register(
             Registries.ITEM,
             Identifier.of(MOD_ID, "cursed_sign"),
@@ -58,20 +58,16 @@ public class KorkuMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KorkuMod 1.21.2 Tum Mekaniklerle Baslatildi!");
+        LOGGER.info("KorkuMod 1.21.2 Guvenli Baslatma Tamamlandi.");
 
-        // 🟢 1. İLK GİRİŞTE TABELA VERME & SAHTE KATILIM MESAJI (Fake Join)
+        // 1. Oyuna Giriş Olayı
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity player = handler.getPlayer();
-            
-            // Envantere Lanetli Tabela ekle
             player.getInventory().insertStack(new ItemStack(CURSED_SIGN_ITEM));
-            
-            // Sahte Katılım Mesajı
             server.getPlayerManager().broadcast(Text.literal("§e[SYSTEM]: Unknown_Presence joined the game"), false);
         });
 
-        // 💬 2. OYUNCU CHAT YANITI ("Hee çağrımı o mal köpek")
+        // 2. Chat Yanıt Sistemi
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             sender.getServer().execute(() -> {
                 sender.getServer().getPlayerManager().broadcast(
@@ -81,10 +77,11 @@ public class KorkuMod implements ModInitializer {
             });
         });
 
-        // 🛌 3. YATAK KABUSU VE KATMANKAYA SAHNESİ
+        // 3. Yatak Etkileşimi (Kabus)
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (world.isClient) return ActionResult.PASS;
             BlockPos pos = hitResult.getBlockPos();
-            if (!world.isClient && world.getBlockState(pos).getBlock().toString().contains("bed")) {
+            if (world.getBlockState(pos).getBlock().toString().contains("bed")) {
                 if (player instanceof ServerPlayerEntity serverPlayer) {
                     startNightmareSequence(serverPlayer);
                     return ActionResult.SUCCESS;
@@ -93,29 +90,23 @@ public class KorkuMod implements ModInitializer {
             return ActionResult.PASS;
         });
 
-        // 🩸 4. LANETLİ TABELA YERE KONDUĞUNDA KANLI SİS VE RİTÜEL
+        // 4. Lanetli Tabela Yerleştirme Etkisi
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (world.isClient) return ActionResult.PASS;
             ItemStack stack = player.getStackInHand(hand);
-            if (!world.isClient && stack.isOf(CURSED_SIGN_ITEM)) {
+            if (stack.isOf(CURSED_SIGN_ITEM)) {
                 ServerWorld serverWorld = (ServerWorld) world;
-
-                // Fırtına ve Kızıl Gökyüzü Yağmuru
                 serverWorld.setWeather(0, 12000, true, true);
-
-                // Dinamik İngilizce Mesaj
                 player.sendMessage(Text.literal("§4I see you, " + player.getName().getString()), false);
-
-                // Karga ve Çılbır Sesleri
                 serverWorld.playSound(null, player.getBlockPos(), SoundEvents.ENTITY_WITHER_SPAWN, SoundCategory.AMBIENT, 1.0f, 0.5f);
             }
             return ActionResult.PASS;
         });
 
-        // 🔄 5. DİNAMİK RASTGELE KORKU ETKİNLİKLERİ (Server Tick Loop)
+        // 5. Dünya Tick Döngüsü ve Korku Mekanikleri
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             tickCounter++;
 
-            // Yatak Kabusu Zamanlayıcısı
             if (nightmareTimer > 0) {
                 nightmareTimer--;
                 if (nightmareTimer == 0 && nightmareTarget != null) {
@@ -123,7 +114,6 @@ public class KorkuMod implements ModInitializer {
                 }
             }
 
-            // Her 10 saniyede bir rastgele olay
             if (tickCounter >= 200) {
                 tickCounter = 0;
 
@@ -131,46 +121,38 @@ public class KorkuMod implements ModInitializer {
                     ServerWorld world = player.getServerWorld();
                     BlockPos pPos = player.getBlockPos();
 
-                    // Kanlı Ayak İzleri Parçacığı
                     world.spawnParticles(ParticleTypes.DUST_PLUME, pPos.getX(), pPos.getY() + 0.1, pPos.getZ(), 5, 0.2, 0.0, 0.2, 0.0);
 
-                    int randomEffect = RANDOM.nextInt(9);
+                    int randomEffect = RANDOM.nextInt(8);
                     switch (randomEffect) {
-                        case 0: // Taklit Adım Sesleri / Kulağının dibinde nefes
+                        case 0:
                             world.playSound(null, pPos, SoundEvents.ENTITY_PLAYER_BREATH, SoundCategory.PLAYERS, 1.5f, 0.2f);
                             break;
-                        case 1: // Cam Kırılması ve Nefes Darlığı
+                        case 1:
                             world.playSound(null, pPos, SoundEvents.BLOCK_GLASS_BREAK, SoundCategory.BLOCKS, 1.0f, 0.8f);
                             player.addStatusEffect(new StatusEffectInstance(StatusEffects.SLOWNESS, 100, 2));
                             player.addStatusEffect(new StatusEffectInstance(StatusEffects.BLINDNESS, 60, 1));
                             break;
-                        case 2: // Kırılan Kapı/Sandık Sesleri
+                        case 2:
                             world.playSound(null, pPos, SoundEvents.ENTITY_ZOMBIE_ATTACK_WOODEN_DOOR, SoundCategory.BLOCKS, 1.0f, 0.5f);
                             break;
-                        case 3: // Bozuk Sohbet / Telsiz Cızırtısı
+                        case 3:
                             player.sendMessage(Text.literal("§c§kHELP ME§r §4I AM BEHIND YOU"), false);
-                            world.playSound(null, pPos, SoundEvents.BLOCK_REDSTONE_TORCH_BURNOUT, SoundCategory.BLOCKS, 1.0f, 0.1f);
                             break;
-                        case 4: // Sönen Meşaleler
+                        case 4:
                             BlockPos torchPos = pPos.add(RANDOM.nextInt(5) - 2, 0, RANDOM.nextInt(5) - 2);
                             if (world.getBlockState(torchPos).isOf(Blocks.TORCH)) {
                                 world.setBlockState(torchPos, Blocks.AIR.getDefaultState());
                                 world.playSound(null, torchPos, SoundEvents.BLOCK_FIRE_EXTINGUISH, SoundCategory.BLOCKS, 1.0f, 1.0f);
                             }
                             break;
-                        case 5: // Yapraksız Ölü Ağaç
-                            BlockPos treePos = pPos.add(6, 0, 6);
-                            world.setBlockState(treePos, Blocks.OAK_LOG.getDefaultState());
-                            world.setBlockState(treePos.up(), Blocks.OAK_LOG.getDefaultState());
+                        case 5:
                             player.sendMessage(Text.literal("§4Bir şey ağaçların arkasından izliyor..."), true);
                             break;
-                        case 6: // Sahte Ölüm Ekranı
+                        case 6:
                             player.networkHandler.sendPacket(new GameStateChangeS2CPacket(GameStateChangeS2CPacket.DEMO_MESSAGE_SHOWN, 0));
                             break;
-                        case 7: // Sahte Envanter Sesi
-                            world.playSound(null, pPos, SoundEvents.UI_BUTTON_CLICK.value(), SoundCategory.PLAYERS, 1.0f, 0.2f);
-                            break;
-                        case 8: // Fırın Cızırtısı Sesi
+                        case 7:
                             world.playSound(null, pPos, SoundEvents.BLOCK_FURNACE_FIRE_CRACKLE, SoundCategory.BLOCKS, 1.0f, 1.0f);
                             break;
                     }
@@ -179,12 +161,10 @@ public class KorkuMod implements ModInitializer {
         });
     }
 
-    // 🛌 Yatak Kabusu Dizisi (1.21.2 Uyumlu Teleport)
     private void startNightmareSequence(ServerPlayerEntity player) {
         ServerWorld world = player.getServerWorld();
         BlockPos nightmarePos = new BlockPos(0, 200, 0);
 
-        // 1. Düz çim alan ve katmankaya oluştur
         for (int x = -5; x <= 5; x++) {
             for (int z = -5; z <= 5; z++) {
                 world.setBlockState(nightmarePos.add(x, -1, z), Blocks.BEDROCK.getDefaultState());
@@ -192,25 +172,19 @@ public class KorkuMod implements ModInitializer {
             }
         }
 
-        // Oyuncuyu ışınla (1.21.2 API Uyumlu Teleport)
         player.requestTeleport(0.5, 201.0, 0.5);
         player.addStatusEffect(new StatusEffectInstance(StatusEffects.SLOWNESS, 200, 255)); 
 
-        // 10 Saniyelik Bakışma Süresi
         nightmareTimer = 200; 
         nightmareTarget = player;
-        
         player.sendMessage(Text.literal("§4..."), true);
     }
 
-    // Kabus Sonu
     private void executeNightmareJumpScare(ServerPlayerEntity player) {
         ServerWorld world = player.getServerWorld();
-        
         world.setWeather(0, 1000, true, true);
         player.sendMessage(Text.literal("§4§lRUNN! RUNN! RUNN!"), false);
         world.playSound(null, player.getBlockPos(), SoundEvents.ENTITY_ENDER_DRAGON_GROWL, SoundCategory.HOSTILE, 2.0f, 0.1f);
-        
         player.removeStatusEffect(StatusEffects.SLOWNESS);
         player.addStatusEffect(new StatusEffectInstance(StatusEffects.BLINDNESS, 100, 1));
     }
