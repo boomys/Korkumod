@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "korkumod",
-  "version": "${version}",
+  "version": "1.0.0",
   "name": "KorkuMod",
   "description": "Minecraft 1.21.2 Korku Modu",
   "authors": [
@@ -13,7 +13,7 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "com.boomys.korkumod.KorkuMod"
+      "com.korkumod.KorkuMod"
     ]
   },
   "depends": {
