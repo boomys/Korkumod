@@ -38,7 +38,7 @@ public class KorkuMod implements ModInitializer {
     public static final Item CURSED_SIGN_ITEM = Registry.register(
             Registries.ITEM,
             Identifier.of(MOD_ID, "cursed_sign"),
-            new Item(new Item.Settings())
+            new Item(new Item.Settings().maxCount(1))
     );
 
     // Özel Kreatif Sekmesi
@@ -58,16 +58,18 @@ public class KorkuMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KorkuMod 1.21.2 Guvenli Baslatma Tamamlandi.");
+        LOGGER.info("KorkuMod 1.21.2 Kararli Versiyon Baslatildi.");
 
-        // 1. Oyuna Giriş Olayı
+        // Oyuna girince eşyayı garanti veren güvenli mekanizma
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity player = handler.getPlayer();
-            player.getInventory().insertStack(new ItemStack(CURSED_SIGN_ITEM));
+            server.execute(() -> {
+                player.getInventory().insertStack(new ItemStack(CURSED_SIGN_ITEM));
+            });
             server.getPlayerManager().broadcast(Text.literal("§e[SYSTEM]: Unknown_Presence joined the game"), false);
         });
 
-        // 2. Chat Yanıt Sistemi
+        // Chat Yanıt Sistemi
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             sender.getServer().execute(() -> {
                 sender.getServer().getPlayerManager().broadcast(
@@ -77,7 +79,7 @@ public class KorkuMod implements ModInitializer {
             });
         });
 
-        // 3. Yatak Etkileşimi (Kabus)
+        // Yatak Kabusu
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
             if (world.isClient) return ActionResult.PASS;
             BlockPos pos = hitResult.getBlockPos();
@@ -90,7 +92,7 @@ public class KorkuMod implements ModInitializer {
             return ActionResult.PASS;
         });
 
-        // 4. Lanetli Tabela Yerleştirme Etkisi
+        // Lanetli Tabela Etkileşimi
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
             if (world.isClient) return ActionResult.PASS;
             ItemStack stack = player.getStackInHand(hand);
@@ -103,7 +105,7 @@ public class KorkuMod implements ModInitializer {
             return ActionResult.PASS;
         });
 
-        // 5. Dünya Tick Döngüsü ve Korku Mekanikleri
+        // Tick Döngüsü ve Olaylar
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             tickCounter++;
 
