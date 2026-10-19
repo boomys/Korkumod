@@ -16,6 +16,8 @@ import net.minecraft.network.packet.s2c.play.GameStateChangeS2CPacket;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
@@ -35,10 +37,14 @@ public class KorkuMod implements ModInitializer {
     private static final Random RANDOM = new Random();
 
     // 1. Lanetli Tabela (Cursed Sign) Eşyası
+    // 1.21.2'de registryKey zorunlu, yoksa "Item id not set" hatası verir
+    public static final RegistryKey<Item> CURSED_SIGN_KEY =
+            RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "cursed_sign"));
+
     public static final Item CURSED_SIGN_ITEM = Registry.register(
             Registries.ITEM,
-            Identifier.of(MOD_ID, "cursed_sign"),
-            new Item(new Item.Settings().maxCount(1))
+            CURSED_SIGN_KEY,
+            new Item(new Item.Settings().maxCount(1).registryKey(CURSED_SIGN_KEY))
     );
 
     // Özel Kreatif Sekmesi
@@ -181,7 +187,7 @@ public class KorkuMod implements ModInitializer {
         }
 
         player.requestTeleport(0.5, 201.0, 0.5);
-        player.addStatusEffect(new StatusEffectInstance(StatusEffects.SLOWNESS, 200, 255)); 
+        player.addStatusEffect(new StatusEffectInstance(StatusEffects.SLOWNESS, 200, 255));
 
         nightmareTimer = 200; // 10 saniye bakışma
         nightmareTarget = player;
