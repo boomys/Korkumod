@@ -1,11 +1,13 @@
 package com.korkumod;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.EntitySleepEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.minecraft.entity.EntityType;
@@ -24,6 +26,7 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
@@ -34,6 +37,9 @@ import net.minecraft.world.Heightmap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Random;
 
 public class KorkuMod implements ModInitializer {
@@ -46,10 +52,18 @@ public class KorkuMod implements ModInitializer {
     private static final int EFFECT_CHANCE = 3;    // her kontrolde efekt şansı: 1/3 (~3 dakikada bir)
     private static final int FIGURE_CHANCE = 6;    // her kontrolde figür şansı: 1/6 (~6 dakikada bir)
 
+    private static final int WINDOW_CHANCE = 5;    // gece içerideyken pencerede adam: 1/5
+    private static final int FOOTSTEP_CHANCE = 5;  // arkandan ayak sesleri: 1/5
+    private static final int FAKE_MSG_CHANCE = 4;  // sahte oyuncu mesajı: 1/4
+    private static final int NIGHTMARE_CHANCE = 3; // yatağa basınca kabus: 1/3 (diğer sefer normal uyursun)
+    private static final int WAKE_FIGURE_CHANCE = 2; // uyanınca adam belirme: 1/2
+
     // Siyah figür modları
     private static final int FIGURE_STARE = 1;     // uzakta durup bakar, kaybolur
     private static final int FIGURE_APPROACH = 2;  // arkandan yavaşça yaklaşır
     private static final int FIGURE_NIGHTMARE = 3; // yatak kabusunda görünür
+    private static final int FIGURE_WINDOW = 4;    // pencerenin dışından bakar
+    private static final int FIGURE_WAKE = 5;      // uyanınca ucunda durur
 
     // 1. Lanetli Tabela (Cursed Sign) Eşyası
     // 1.21.2'de registryKey zorunlu, yoksa "Item id not set" hatası verir
@@ -96,6 +110,18 @@ public class KorkuMod implements ModInitializer {
     private int figureMode = 0;
     private int figureTicks = 0;
 
+    // Ayak sesleri durumu
+    private ServerPlayerEntity stepTarget = null;
+    private int stepTicks = 0;
+    private int stepCooldown = 0;
+    private double stepDist = 8.0;
+    private double stepLastX = 0;
+    private double stepLastZ = 0;
+
+    // Uyanınca beliren adam için bekleyen oyuncu
+    private ServerPlayerEntity wakeTarget = null;
+    private int wakeDelay = 0;
+
     @Override
     public void onInitialize() {
         LOGGER.info("KorkuMod Tum Mekaniklerle Tam Kapasite Baslatildi!");
@@ -126,12 +152,20 @@ public class KorkuMod implements ModInitializer {
             if (world.isClient) return ActionResult.PASS;
             BlockPos pos = hitResult.getBlockPos();
             if (world.getBlockState(pos).getBlock().toString().contains("bed")) {
-                if (player instanceof ServerPlayerEntity serverPlayer) {
+                if (player instanceof ServerPlayerEntity serverPlayer && RANDOM.nextInt(NIGHTMARE_CHANCE) == 0) {
                     startNightmareSequence(serverPlayer);
                     return ActionResult.SUCCESS;
                 }
             }
             return ActionResult.PASS;
+        });
+
+        // 🌅 Yataktan kalkınca ucunda siyah adam belirir
+        EntitySleepEvents.STOP_SLEEPING.register((entity, sleepingPos) -> {
+            if (entity instanceof ServerPlayerEntity sp && RANDOM.nextInt(WAKE_FIGURE_CHANCE) == 0) {
+                wakeTarget = sp;
+                wakeDelay = 30; // uyandıktan ~1.5 sn sonra
+            }
         });
 
         // 🩸 Lanetli Tabela Yere Konulduğunda Ritüel Başlangıcı
@@ -153,6 +187,16 @@ public class KorkuMod implements ModInitializer {
 
             // Siyah figürü her tick güncelle
             tickFigure();
+            tickFootsteps();
+
+            // Uyanınca beliren adam
+            if (wakeTarget != null && --wakeDelay <= 0) {
+                ServerPlayerEntity w = wakeTarget;
+                wakeTarget = null;
+                if (figure == null && nightmareTimer <= 0 && w.isAlive() && !w.isRemoved()) {
+                    spawnFigureIndoors(w, FIGURE_WAKE, 3.0);
+                }
+            }
 
             if (nightmareTimer > 0) {
                 nightmareTimer--;
@@ -164,6 +208,14 @@ public class KorkuMod implements ModInitializer {
             // Periyodik Korku Tetikleyicileri (PERIOD_TICKS'te bir kontrol edilir)
             if (tickCounter >= PERIOD_TICKS) {
                 tickCounter = 0;
+
+                // 💬 Sahte oyuncu mesajı (sunucuda olmayan biri girdi/çıktı)
+                if (RANDOM.nextInt(FAKE_MSG_CHANCE) == 0 && !server.getPlayerManager().getPlayerList().isEmpty()) {
+                    String[] names = {"Steve", "Alex", "Notch", "Herobrine", "Unknown_Presence"};
+                    String fakeName = names[RANDOM.nextInt(names.length)];
+                    String what = RANDOM.nextBoolean() ? "joined the game" : "left the game";
+                    server.getPlayerManager().broadcast(Text.literal("§e" + fakeName + " " + what), false);
+                }
 
                 for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                     ServerWorld world = player.getServerWorld();
@@ -177,6 +229,20 @@ public class KorkuMod implements ModInitializer {
                         } else {
                             spawnFigure(player, FIGURE_APPROACH, 20.0, true); // arkadan gelir
                         }
+                    }
+
+                    // 🪟 Gece içerideyken pencerenin dışında siyah adam
+                    if (figure == null && nightmareTimer <= 0 && !world.isSkyVisible(pPos)) {
+                        long dayTime = world.getTimeOfDay() % 24000L;
+                        boolean night = dayTime >= 13000L && dayTime <= 23000L;
+                        if (night && RANDOM.nextInt(WINDOW_CHANCE) == 0) {
+                            trySpawnWindowFigure(player);
+                        }
+                    }
+
+                    // 👣 Arkandan ayak sesleri
+                    if (stepTarget == null && RANDOM.nextInt(FOOTSTEP_CHANCE) == 0) {
+                        startFootsteps(player);
                     }
 
                     // Efektler her kontrolde değil, arada bir olsun
@@ -314,7 +380,131 @@ public class KorkuMod implements ModInitializer {
             figure.setPosition(nx, ny, nz);
         } else if (figureMode == FIGURE_NIGHTMARE) {
             if (figureTicks >= 600) removeFigure(false);
+        } else if (figureMode == FIGURE_WAKE) {
+            // 1 saniye sonra kaybolur
+            if (figureTicks >= 25) removeFigure(true);
+        } else if (figureMode == FIGURE_WINDOW) {
+            if (figureTicks >= 1200) {
+                removeFigure(true);
+                return;
+            }
+            // Sen ona bakınca kaybolur
+            if (figureTicks >= 40) {
+                Vec3d eye = figureTarget.getEyePos();
+                Vec3d to = new Vec3d(figure.getX(), figure.getY() + 1.6, figure.getZ()).subtract(eye);
+                double d = to.length();
+                if (d > 0.1 && d < 16.0) {
+                    double dot = figureTarget.getRotationVec(1.0f).dotProduct(to.multiply(1.0 / d));
+                    if (dot > 0.93) removeFigure(true);
+                }
+            }
         }
+    }
+
+    // Oyuncunun baktığı yönün yatay birim vektörü
+    private double[] horizontalLook(ServerPlayerEntity p) {
+        Vec3d look = p.getRotationVec(1.0f);
+        double hx = look.x;
+        double hz = look.z;
+        double len = Math.sqrt(hx * hx + hz * hz);
+        if (len < 0.01) {
+            return new double[]{0.0, 1.0};
+        }
+        return new double[]{hx / len, hz / len};
+    }
+
+    // İçeride (tavan altında) oyuncunun önünde figür oluşturur
+    private boolean spawnFigureIndoors(ServerPlayerEntity player, int mode, double distance) {
+        ServerWorld world = player.getServerWorld();
+        double[] h = horizontalLook(player);
+        for (double d : new double[]{distance, distance - 1.0, distance + 1.0}) {
+            double x = player.getX() + h[0] * d;
+            double z = player.getZ() + h[1] * d;
+            BlockPos feet = BlockPos.ofFloored(x, player.getY(), z);
+            if (world.getBlockState(feet).isAir() && world.getBlockState(feet.up()).isAir()
+                    && !world.getBlockState(feet.down()).isAir()) {
+                spawnFigureAt(player, mode, x, feet.getY(), z);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Yakındaki bir camın dışında (dışarıda, zeminde) figür oluşturur
+    private boolean trySpawnWindowFigure(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        BlockPos base = player.getBlockPos();
+        List<BlockPos> windows = new ArrayList<>();
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                for (int dy = -1; dy <= 3; dy++) {
+                    BlockPos g = base.add(dx, dy, dz);
+                    BlockState st = world.getBlockState(g);
+                    if (st.isOf(Blocks.GLASS) || st.isOf(Blocks.GLASS_PANE)) {
+                        windows.add(g);
+                    }
+                }
+            }
+        }
+        Collections.shuffle(windows, RANDOM);
+        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (BlockPos g : windows) {
+            for (int[] d : dirs) {
+                BlockPos outside = g.add(d[0], 0, d[1]);
+                BlockPos inside = g.add(-d[0], 0, -d[1]);
+                BlockPos feet = outside.down();
+                if (!world.getBlockState(inside).isAir()) continue;
+                if (!world.getBlockState(outside).isAir()) continue;
+                if (!world.getBlockState(feet).isAir()) continue;
+                if (world.getBlockState(feet.down()).isAir()) continue;
+                if (!world.isSkyVisible(outside)) continue;
+                spawnFigureAt(player, FIGURE_WINDOW, outside.getX() + 0.5, feet.getY(), outside.getZ() + 0.5);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ================= AYAK SESLERİ =================
+
+    private void startFootsteps(ServerPlayerEntity p) {
+        stepTarget = p;
+        stepTicks = 600; // ~30 saniye
+        stepCooldown = 0;
+        stepDist = 8.0;
+        stepLastX = p.getX();
+        stepLastZ = p.getZ();
+    }
+
+    private void tickFootsteps() {
+        if (stepTarget == null) return;
+        ServerPlayerEntity p = stepTarget;
+        if (p.isRemoved() || !p.isAlive() || stepTicks <= 0) {
+            stepTarget = null;
+            return;
+        }
+        stepTicks--;
+
+        double mx = p.getX() - stepLastX;
+        double mz = p.getZ() - stepLastZ;
+        stepLastX = p.getX();
+        stepLastZ = p.getZ();
+        double speed = Math.sqrt(mx * mx + mz * mz);
+
+        if (stepCooldown > 0) stepCooldown--;
+        if (speed < 0.03) return;   // duruyorsan ayak sesleri de durur
+        if (stepCooldown > 0) return;
+        stepCooldown = speed > 0.25 ? 4 : 8; // koşarsan daha hızlı
+
+        ServerWorld w = p.getServerWorld();
+        double[] h = horizontalLook(p);
+        double x = p.getX() - h[0] * stepDist;
+        double z = p.getZ() - h[1] * stepDist;
+        stepDist = Math.max(3.0, stepDist - 0.15); // yavaş yavaş yaklaşır
+
+        BlockState below = w.getBlockState(p.getBlockPos().down());
+        SoundEvent step = below.getSoundGroup().getStepSound();
+        w.playSound(null, x, p.getY(), z, step, SoundCategory.PLAYERS, 0.9f, 0.8f);
     }
 
     // Yaklaşan figür oyuncuya ulaşınca
