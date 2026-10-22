@@ -2,6 +2,7 @@ package com.korkumod;
 
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.attribute.DefaultAttributeContainer;
+import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.PathAwareEntity;
 import net.minecraft.world.World;
@@ -12,6 +13,8 @@ public class KorkuAdamEntity extends PathAwareEntity {
     }
 
     public static DefaultAttributeContainer.Builder createAttributes() {
-        return MobEntity.createMobAttributes();
+        return MobEntity.createMobAttributes()
+                .add(EntityAttributes.MOVEMENT_SPEED, 0.1)
+                .add(EntityAttributes.FOLLOW_RANGE, 64.0);
     }
 }
