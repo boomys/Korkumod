@@ -1,0 +1,10 @@
+{
+  "chase_music": {
+    "sounds": [
+      {
+        "name": "korkumod:chase_music",
+        "stream": true
+      }
+    ]
+  }
+}
