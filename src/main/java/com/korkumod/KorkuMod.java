@@ -5,7 +5,6 @@ import net.fabricmc.fabric.api.entity.event.v1.EntitySleepEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
-import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -54,7 +53,18 @@ import net.minecraft.network.packet.s2c.play.TitleS2CPacket;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.world.World;
 
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.item.BlockItem;
+import net.minecraft.network.packet.s2c.play.StopSoundS2CPacket;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.math.Box;
+import net.minecraft.world.GameRules;
+
 import java.util.ArrayList;
+import java.util.UUID;
 import java.util.Iterator;
 import java.util.Collections;
 import java.util.List;
@@ -78,6 +88,13 @@ public class KorkuMod implements ModInitializer {
 
     private static final int NEW_EVENT_CHANCE = 4;  // yeni olaylar havuzu: her kontrolde 1/4 (~4 dakikada bir)
 
+    // ===== "null" OLAYI AYARLARI =====
+    private static final int NULL_FIRST_DELAY = 3600;  // sunucu açıldıktan ~3 dk sonra ilk ziyaret
+    private static final int NULL_INTERVAL = 12000;    // ziyaretler arası: 12000 tick = 10 dk (test için 1200 yap)
+    private static final int NULL_WAIT_TICKS = 3600;   // eşyayı getirmek için süre: 3 dk
+    private static final int NULL_CHASE_TICKS = 600;   // kaçış süresi: 30 sn
+    private static final int NULL_RAID_CHANCE = 5;     // ziyaretlerin 1/5'i TPA baskını (kılıçla öldürür)
+
     // Siyah figür modları
     private static final int FIGURE_STARE = 1;     // uzakta durup bakar, kaybolur
     private static final int FIGURE_APPROACH = 2;  // arkandan yavaşça yaklaşır
@@ -86,6 +103,12 @@ public class KorkuMod implements ModInitializer {
     private static final int FIGURE_WAKE = 5;      // uyanınca ucunda durur
     private static final int FIGURE_TREE = 6;      // ağacın arkasından izler
     private static final int FIGURE_BEDMAN = 7;    // yatakta yatar
+    private static final int FIGURE_NULL = 8;      // "null" ziyaretçisi (istek / kovalama / baskın)
+
+    private static final int NULL_PHASE_WAIT = 1;
+    private static final int NULL_PHASE_COUNTDOWN = 2;
+    private static final int NULL_PHASE_CHASE = 3;
+    private static final int NULL_PHASE_RAID = 4;
 
     // 1. Lanetli Tabela (Cursed Sign) Eşyası
     // 1.21.2'de registryKey zorunlu, yoksa "Item id not set" hatası verir
@@ -103,7 +126,7 @@ public class KorkuMod implements ModInitializer {
             Registries.ITEM_GROUP,
             Identifier.of(MOD_ID, "korkumod_group"),
             FabricItemGroup.builder()
-                    .displayName(Text.literal("KorkuMod Sekmesi"))
+                    .displayName(Text.literal("KorkuMod"))
                     .icon(() -> new ItemStack(CURSED_SIGN_ITEM))
                     .entries((displayContext, entries) -> entries.add(CURSED_SIGN_ITEM))
                     .build()
@@ -119,6 +142,13 @@ public class KorkuMod implements ModInitializer {
             EntityType.Builder.create(KorkuAdamEntity::new, SpawnGroup.MISC)
                     .dimensions(0.6f, 1.8f)
                     .build(KORKU_ADAM_KEY)
+    );
+
+    // Kaçış müziği (assets/korkumod/sounds/chase_music.ogg)
+    public static final SoundEvent CHASE_MUSIC = Registry.register(
+            Registries.SOUND_EVENT,
+            Identifier.of(MOD_ID, "chase_music"),
+            SoundEvent.of(Identifier.of(MOD_ID, "chase_music"))
     );
 
     private int tickCounter = 0;
@@ -162,11 +192,44 @@ public class KorkuMod implements ModInitializer {
     private int darkTicks = 0;
     private long darkOriginal = 0;
 
+    // "null" durumu
+    private int nullCooldown = NULL_FIRST_DELAY;
+    private int nullPhase = 0;
+    private int nullTimer = 0;
+    private Item nullItem = null;
+    private int nullItemCount = 0;
+    private ServerPlayerEntity lockedPlayer = null;
+
+    // Baskında envanter korunması (keepInventory geçici açılır)
+    private boolean keepInvToggled = false;
+    private boolean savedKeepInv = false;
+    private int keepInvTicks = 0;
+    private MinecraftServer keepInvServer = null;
+    private UUID raidVictim = null;
+
     @Override
     public void onInitialize() {
-        LOGGER.info("KorkuMod Tum Mekaniklerle Tam Kapasite Baslatildi!");
+        LOGGER.info("KorkuMod started with all mechanics.");
 
         FabricDefaultAttributeRegistry.register(KORKU_ADAM, KorkuAdamEntity.createAttributes());
+
+        // 🔒 Kaçış sırasında blok kırma ve koyma kilidi
+        PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
+                !(lockedPlayer != null && player == lockedPlayer));
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (lockedPlayer != null && player == lockedPlayer
+                    && player.getStackInHand(hand).getItem() instanceof BlockItem) {
+                return ActionResult.FAIL;
+            }
+            return ActionResult.PASS;
+        });
+
+        // Baskında ölen oyuncu yeniden doğunca keepInventory eski haline döner
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            if (raidVictim != null && newPlayer.getUuid().equals(raidVictim)) {
+                restoreKeepInventory(newPlayer.getServer());
+            }
+        });
 
         // 🟢 Oyuna Girişte Fake Join Mesajı ve Eşya Teslimi
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
@@ -175,16 +238,6 @@ public class KorkuMod implements ModInitializer {
                 player.getInventory().insertStack(new ItemStack(CURSED_SIGN_ITEM));
             });
             server.getPlayerManager().broadcast(Text.literal("§e[SYSTEM]: Unknown_Presence joined the game"), false);
-        });
-
-        // 💬 Oyuncu Chat Yanıt Sistemi ("Hee çağrımı o mal köpek")
-        ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
-            sender.getServer().execute(() -> {
-                sender.getServer().getPlayerManager().broadcast(
-                    Text.literal("§4<Unknown_Presence> §cHee çağrımı o mal köpek"),
-                    false
-                );
-            });
         });
 
         // 🛌 Yatak Kabusu ve Katmankaya Sahnesi
@@ -232,6 +285,7 @@ public class KorkuMod implements ModInitializer {
             tickSoundTasks();
             tickEyes();
             tickDarkness();
+            tickNullScheduler(server);
 
             // Uyanınca beliren adam
             if (wakeTarget != null && --wakeDelay <= 0) {
@@ -324,7 +378,7 @@ public class KorkuMod implements ModInitializer {
                             }
                             break;
                         case 5: // Yapraksız ölü ağaç hissi / stalker mesajı
-                            player.sendMessage(Text.literal("§4Bir şey ağaçların arkasından izliyor..."), true);
+                            player.sendMessage(Text.literal("§4Something is watching from behind the trees..."), true);
                             break;
                         case 6: // Sahte ölüm ekranı kırılması
                             player.networkHandler.sendPacket(new GameStateChangeS2CPacket(GameStateChangeS2CPacket.DEMO_MESSAGE_SHOWN, 0));
@@ -404,6 +458,13 @@ public class KorkuMod implements ModInitializer {
         }
 
         figureTicks++;
+
+        // "null" ziyaretçisinin kendi mantığı var
+        if (figureMode == FIGURE_NULL) {
+            tickNull();
+            return;
+        }
+
         if (figureTicks % 5 == 0 && figureMode != FIGURE_BEDMAN) faceTarget();
 
         double dx = figureTarget.getX() - figure.getX();
@@ -520,6 +581,256 @@ public class KorkuMod implements ModInitializer {
             }
         }
         return false;
+    }
+
+    // ================= "null" ZİYARETÇİSİ =================
+
+    private void tickNullScheduler(MinecraftServer server) {
+        // Baskından sonra keepInventory takılı kalmasın diye emniyet (60 dk)
+        if (keepInvToggled && --keepInvTicks <= 0) {
+            restoreKeepInventory(keepInvServer);
+        }
+
+        List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList();
+        if (players.isEmpty()) return;
+        if (nullCooldown > 0) {
+            nullCooldown--;
+            return;
+        }
+        if (figure != null || nightmareTimer > 0) {
+            nullCooldown = 200; // meşgulse biraz sonra tekrar dene
+            return;
+        }
+        ServerPlayerEntity target = players.get(RANDOM.nextInt(players.size()));
+        if (target.isSpectator() || !target.isAlive()) {
+            nullCooldown = 200;
+            return;
+        }
+        nullCooldown = NULL_INTERVAL;
+        startNullVisit(target);
+    }
+
+    private void startNullVisit(ServerPlayerEntity target) {
+        boolean raid = RANDOM.nextInt(NULL_RAID_CHANCE) == 0;
+        BlockPos spot = raid ? findStandingSpot(target, 14.0, 18.0) : findStandingSpot(target, 6.0, 10.0);
+        if (spot == null) {
+            nullCooldown = 600; // uygun yer yok, 30 sn sonra tekrar dene
+            return;
+        }
+        spawnFigureAt(target, FIGURE_NULL, spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5);
+        if (figure == null) return;
+        figure.setCustomName(Text.literal("null"));
+        figure.setCustomNameVisible(true);
+
+        if (raid) {
+            // TPA baskını: kılıçla yanına ışınlanır, koşarak öldürür
+            nullPhase = NULL_PHASE_RAID;
+            nullTimer = NULL_CHASE_TICKS;
+            figure.setAiDisabled(false);
+            figure.setSilent(false);
+            figure.equipStack(EquipmentSlot.MAINHAND, new ItemStack(Items.NETHERITE_SWORD));
+            target.sendMessage(Text.literal("§e<null> teleported to you."), false);
+            figureWorld.playSound(null, target.getBlockPos(), SoundEvents.ENTITY_ENDERMAN_TELEPORT, SoundCategory.HOSTILE, 1.5f, 0.6f);
+        } else {
+            // Eşya isteği
+            Item[] items = {Items.DIAMOND, Items.EMERALD, Items.ENDER_PEARL, Items.GOLDEN_APPLE,
+                    Items.GOLD_INGOT, Items.BLAZE_ROD, Items.NETHERITE_INGOT};
+            int[] counts = {2, 4, 2, 1, 8, 3, 1};
+            String[] names = {"diamonds", "emeralds", "ender pearls", "golden apple",
+                    "gold ingots", "blaze rods", "netherite ingot"};
+            int idx = RANDOM.nextInt(8) == 0 ? 6 : RANDOM.nextInt(6); // netherite nadir
+            nullItem = items[idx];
+            nullItemCount = counts[idx];
+            nullPhase = NULL_PHASE_WAIT;
+            nullTimer = NULL_WAIT_TICKS;
+            target.sendMessage(Text.literal("§7<null> §fBring me " + counts[idx] + " " + names[idx]
+                    + ". Drop them at my feet. You have 3 minutes."), false);
+        }
+    }
+
+    // Oyuncunun etrafında, zemine basan ve boş duran bir nokta bulur
+    private BlockPos findStandingSpot(ServerPlayerEntity p, double minDist, double maxDist) {
+        ServerWorld w = p.getServerWorld();
+        for (int i = 0; i < 30; i++) {
+            double ang = RANDOM.nextDouble() * Math.PI * 2;
+            double d = minDist + RANDOM.nextDouble() * (maxDist - minDist);
+            int x = (int) Math.floor(p.getX() + Math.cos(ang) * d);
+            int z = (int) Math.floor(p.getZ() + Math.sin(ang) * d);
+            for (int dy = 3; dy >= -4; dy--) {
+                BlockPos feet = new BlockPos(x, p.getBlockPos().getY() + dy, z);
+                if (w.getBlockState(feet).isAir() && w.getBlockState(feet.up()).isAir()
+                        && !w.getBlockState(feet.down()).isAir()) {
+                    return feet;
+                }
+            }
+        }
+        return null;
+    }
+
+    private void tickNull() {
+        ServerPlayerEntity p = figureTarget;
+        ServerWorld w = figureWorld;
+        nullTimer--;
+
+        if (nullPhase == NULL_PHASE_WAIT) {
+            if (figureTicks % 5 == 0) faceTarget();
+            if (figureTicks % 10 == 0 && checkNullDelivery()) return;
+            if (nullTimer == 2400 || nullTimer == 1200 || nullTimer == 600) {
+                p.sendMessage(Text.literal("§7<null> §f" + (nullTimer / 20) + " seconds left."), false);
+            }
+            if (nullTimer <= 0) {
+                nullPhase = NULL_PHASE_COUNTDOWN;
+                nullTimer = 201;
+                p.sendMessage(Text.literal("§4<null> You did not bring it."), false);
+                w.playSound(null, p.getBlockPos(), SoundEvents.ENTITY_WARDEN_HEARTBEAT, SoundCategory.HOSTILE, 2.0f, 0.6f);
+            }
+        } else if (nullPhase == NULL_PHASE_COUNTDOWN) {
+            if (figureTicks % 5 == 0) faceTarget();
+            if (nullTimer > 0 && nullTimer % 20 == 0) {
+                int n = nullTimer / 20;
+                p.sendMessage(Text.literal("§4§l" + n), false);
+                w.playSound(null, p.getBlockPos(), SoundEvents.ENTITY_WARDEN_HEARTBEAT, SoundCategory.HOSTILE,
+                        2.0f, 0.8f + (10 - n) * 0.06f);
+            }
+            if (nullTimer <= 0) startNullChase();
+        } else if (nullPhase == NULL_PHASE_CHASE) {
+            tickNullChase(p, w);
+        } else if (nullPhase == NULL_PHASE_RAID) {
+            tickNullRaid(p, w);
+        }
+    }
+
+    // Yere atılan eşyaları kontrol eder, yeterliyse alıp kaybolur
+    private boolean checkNullDelivery() {
+        if (nullItem == null) return false;
+        Box box = figure.getBoundingBox().expand(3.0);
+        List<ItemEntity> drops = figureWorld.getEntitiesByClass(ItemEntity.class, box,
+                it -> it.getStack().isOf(nullItem));
+        int total = 0;
+        for (ItemEntity e : drops) {
+            total += e.getStack().getCount();
+        }
+        if (total < nullItemCount) return false;
+
+        int need = nullItemCount;
+        for (ItemEntity e : drops) {
+            if (need <= 0) break;
+            ItemStack s = e.getStack();
+            int take = Math.min(need, s.getCount());
+            s.decrement(take);
+            need -= take;
+            if (s.isEmpty()) {
+                e.discard();
+            } else {
+                e.setStack(s.copy());
+            }
+        }
+
+        ServerPlayerEntity p = figureTarget;
+        String[] lines = {"Task complete.", "Good. Do not make me ask twice.", "It is done. You are spared. For now."};
+        p.sendMessage(Text.literal("§7<null> §f" + lines[RANDOM.nextInt(lines.length)]), false);
+        figureWorld.playSound(null, figure.getBlockPos(), SoundEvents.ENTITY_ENDERMAN_TELEPORT, SoundCategory.HOSTILE, 1.5f, 0.5f);
+        removeFigure(true);
+        return true;
+    }
+
+    // 10..1 bitti: ekranda RUN, blok kilidi, müzik, kovalama başlar
+    private void startNullChase() {
+        ServerPlayerEntity p = figureTarget;
+        nullPhase = NULL_PHASE_CHASE;
+        nullTimer = NULL_CHASE_TICKS;
+        lockedPlayer = p;
+        figure.setAiDisabled(false);
+        figure.setSilent(false);
+
+        p.networkHandler.sendPacket(new TitleFadeS2CPacket(0, 60, 10));
+        p.networkHandler.sendPacket(new TitleS2CPacket(Text.literal("§4§lRUN")));
+        p.sendMessage(Text.literal("§4<null> RUN."), false);
+        p.playSoundToPlayer(CHASE_MUSIC, SoundCategory.MASTER, 1.0f, 1.0f);
+        figureWorld.playSound(null, p.getBlockPos(), SoundEvents.ENTITY_ENDER_DRAGON_GROWL, SoundCategory.HOSTILE, 2.0f, 0.2f);
+    }
+
+    private void tickNullChase(ServerPlayerEntity p, ServerWorld w) {
+        double dist = figure.distanceTo(p);
+
+        if (nullTimer > 0 && nullTimer % 20 == 0) {
+            p.sendMessage(Text.literal("§4§lRUN §c" + (nullTimer / 20) + "s"), true);
+        }
+
+        if (dist < 1.8) {
+            // Yakalandı: çok hasar ama ölmez (en az 1 kalp kalır)
+            p.setHealth(Math.max(2.0f, p.getHealth() - 16.0f));
+            w.playSound(null, p.getBlockPos(), SoundEvents.ENTITY_PLAYER_HURT, SoundCategory.PLAYERS, 1.5f, 0.7f);
+            p.addStatusEffect(new StatusEffectInstance(StatusEffects.BLINDNESS, 60, 0));
+            p.sendMessage(Text.literal("§4<null> Too slow."), false);
+            removeFigure(true);
+            return;
+        }
+
+        if (nullTimer <= 0) {
+            p.sendMessage(Text.literal("§7<null> Not this time."), false);
+            removeFigure(true);
+            return;
+        }
+
+        if (figureTicks % 5 == 0) {
+            if (dist > 28.0) {
+                // Çok uzaklaştıysan yakınında yeniden belirir
+                BlockPos spot = findStandingSpot(p, 14.0, 20.0);
+                if (spot != null) {
+                    figure.refreshPositionAndAngles(spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5, 0.0f, 0.0f);
+                }
+            } else {
+                figure.getNavigation().startMovingTo(p, 1.25);
+            }
+        }
+    }
+
+    private void tickNullRaid(ServerPlayerEntity p, ServerWorld w) {
+        double dist = figure.distanceTo(p);
+
+        if (dist < 1.8) {
+            // Öldürür ama eşyalar kalsın: keepInventory geçici açılır, yeniden doğunca eski haline döner
+            MinecraftServer server = p.getServer();
+            if (server != null && !keepInvToggled) {
+                GameRules.BooleanRule rule = server.getGameRules().get(GameRules.KEEP_INVENTORY);
+                savedKeepInv = rule.get();
+                rule.set(true, server);
+                keepInvToggled = true;
+                keepInvTicks = 72000;
+                keepInvServer = server;
+                raidVictim = p.getUuid();
+            }
+            p.damage(w, w.getDamageSources().mobAttack(figure), 1000.0f);
+            removeFigure(false);
+            return;
+        }
+
+        if (nullTimer <= 0) {
+            removeFigure(true);
+            return;
+        }
+
+        if (figureTicks % 5 == 0) {
+            if (dist > 30.0) {
+                BlockPos spot = findStandingSpot(p, 14.0, 18.0);
+                if (spot != null) {
+                    figure.refreshPositionAndAngles(spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5, 0.0f, 0.0f);
+                }
+            } else {
+                figure.getNavigation().startMovingTo(p, 1.45);
+            }
+        }
+    }
+
+    private void restoreKeepInventory(MinecraftServer server) {
+        if (!keepInvToggled) return;
+        if (server != null) {
+            server.getGameRules().get(GameRules.KEEP_INVENTORY).set(savedKeepInv, server);
+        }
+        keepInvToggled = false;
+        keepInvTicks = 0;
+        raidVictim = null;
     }
 
     // ================= YENİ OLAY HAVUZU =================
@@ -747,7 +1058,7 @@ public class KorkuMod implements ModInitializer {
 
     // 15) Ekranın ortasında bir an yazı çıkar
     private boolean eventTitle(ServerPlayerEntity p) {
-        String[] texts = {"§4§lBAK", "§4§lARKANDA", "§c§lSENİ GÖRÜYORUM"};
+        String[] texts = {"§4§lLOOK", "§4§lBEHIND YOU", "§c§lI SEE YOU"};
         String text = texts[RANDOM.nextInt(texts.length)];
         p.networkHandler.sendPacket(new TitleFadeS2CPacket(0, 15, 5));
         p.networkHandler.sendPacket(new TitleS2CPacket(Text.literal(text)));
@@ -756,8 +1067,8 @@ public class KorkuMod implements ModInitializer {
 
     // 16) Envantere gizemli bir not düşer
     private boolean eventNote(ServerPlayerEntity p) {
-        String[] titles = {"§4Arkanı dönme", "§4Seni izliyorum", "§4Kaçamazsın"};
-        String[] lores = {"§7Bunu sen yazmadın.", "§7Yanındayım.", "§7Hâlâ buradayım."};
+        String[] titles = {"§4Don't turn around", "§4I am watching you", "§4You can't escape"};
+        String[] lores = {"§7You did not write this.", "§7I am right beside you.", "§7I am still here."};
         int i = RANDOM.nextInt(titles.length);
         ItemStack note = new ItemStack(Items.PAPER);
         note.set(DataComponentTypes.CUSTOM_NAME, Text.literal(titles[i]));
@@ -962,11 +1273,17 @@ public class KorkuMod implements ModInitializer {
         ServerPlayerEntity p = figureTarget;
         world.playSound(null, p.getBlockPos(), SoundEvents.ENTITY_ENDERMAN_SCREAM, SoundCategory.HOSTILE, 2.0f, 0.5f);
         p.addStatusEffect(new StatusEffectInstance(StatusEffects.BLINDNESS, 40, 1));
-        p.sendMessage(Text.literal("§4§l...arkandaydı."), true);
+        p.sendMessage(Text.literal("§4§l...it was right behind you."), true);
         removeFigure(true);
     }
 
     private void removeFigure(boolean poof) {
+        if (figureMode == FIGURE_NULL && nullPhase == NULL_PHASE_CHASE && figureTarget != null) {
+            figureTarget.networkHandler.sendPacket(
+                    new StopSoundS2CPacket(Identifier.of(MOD_ID, "chase_music"), SoundCategory.MASTER));
+        }
+        nullPhase = 0;
+        lockedPlayer = null;
         if (figure != null && !figure.isRemoved()) {
             if (poof && figureWorld != null) {
                 figureWorld.spawnParticles(ParticleTypes.LARGE_SMOKE, figure.getX(), figure.getY() + 1.5, figure.getZ(), 20, 0.3, 0.8, 0.3, 0.02);
