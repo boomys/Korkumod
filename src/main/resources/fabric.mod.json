@@ -13,7 +13,8 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "com.korkumod.KorkuMod"
+      "com.korkumod.KorkuMod",
+      "com.korkumod.CubeMod"
     ],
     "client": [
       "com.korkumod.KorkuModClient"
