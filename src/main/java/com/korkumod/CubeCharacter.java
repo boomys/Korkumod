@@ -1,56 +1,108 @@
 package com.korkumod;
 
+import net.minecraft.entity.Entity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
-import net.minecraft.util.math.Vec3d;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.UUID;
 
 public class CubeCharacter {
-  private static class Cube {
+  public static final String NAME = "Vesper";
+  private static final double HB = 0.3;
+  private static final double HL = 0.5;
+
+  private static final String[] LID_NAME = {"v_lid", "v_lidin", "v_eyeL", "v_eyeR", "v_pupL", "v_pupR"};
+  private static final String[] LID_BLOCK = {"red_concrete", "black_concrete", "white_concrete", "white_concrete", "black_concrete", "black_concrete"};
+  private static final double[][] LID_GEO = {
+      {-0.4, 0.0, 0.0, 0.8, HL, 0.8},
+      {-0.34, -0.012, 0.06, 0.68, 0.014, 0.68},
+      {-0.3, 0.14, 0.795, 0.2, 0.28, 0.02},
+      {0.1, 0.14, 0.795, 0.2, 0.28, 0.02},
+      {-0.24, 0.18, 0.81, 0.11, 0.22, 0.02},
+      {0.16, 0.18, 0.81, 0.11, 0.22, 0.02}
+  };
+
+  public static class Cube {
     final String tag;
-    ServerWorld world;
-    double x;
-    double y;
-    double z;
-    int age = 0;
+    final ServerWorld world;
+    final double x;
+    final double y;
+    final double z;
+    double yaw;
+    double g = 1.0;
+    double lid = 0.0;
     int talkTicks = 0;
     boolean mouthOpen = false;
+    boolean wide = false;
 
-    Cube(String tag, ServerWorld world) {
+    Cube(String tag, ServerWorld world, double x, double y, double z, double yaw) {
       this.tag = tag;
       this.world = world;
+      this.x = x;
+      this.y = y;
+      this.z = z;
+      this.yaw = yaw;
     }
   }
 
-  private final Map<UUID, Cube> cubes = new HashMap<>();
+  private static class Later {
+    int ticks;
+    final Runnable action;
 
-  public boolean has(ServerPlayerEntity p) {
-    return cubes.containsKey(p.getUuid());
+    Later(int ticks, Runnable action) {
+      this.ticks = ticks;
+      this.action = action;
+    }
   }
 
-  public void spawn(ServerPlayerEntity p) {
-    remove(p);
+  private final List<Cube> cubes = new ArrayList<>();
+  private final List<Later> laters = new ArrayList<>();
+  private int counter = 0;
+
+  public Cube place(ServerPlayerEntity p, double x, double y, double z) {
     MinecraftServer server = p.getServer();
-    String tag = "cube_" + p.getUuidAsString().replace("-", "").substring(0, 12);
-    Cube c = new Cube(tag, p.getServerWorld());
-    Vec3d t = targetFor(p, 0);
-    c.x = t.x;
-    c.y = t.y;
-    c.z = t.z;
-    summonParts(server, c);
-    cubes.put(p.getUuid(), c);
+    double yaw = Math.toDegrees(Math.atan2(-(p.getX() - x), p.getZ() - z));
+    counter++;
+    Cube c = new Cube("vesper_" + counter + "_" + (System.currentTimeMillis() % 100000), p.getServerWorld(), x, y, z, yaw);
+    summonAll(server, c);
+    cubes.add(c);
+    run(server, c.world, "particle minecraft:poof " + f(x) + " " + f(y + 0.4) + " " + f(z) + " 0.3 0.3 0.3 0.05 25 normal");
+    return c;
   }
 
-  public void remove(ServerPlayerEntity p) {
-    Cube c = cubes.remove(p.getUuid());
-    if (c != null) {
-      kill(p.getServer(), c);
+  public Cube nearest(ServerPlayerEntity p, double maxDist) {
+    Cube best = null;
+    double bestD = maxDist * maxDist;
+    for (Cube c : cubes) {
+      if (c.world != p.getServerWorld()) continue;
+      double d = p.squaredDistanceTo(c.x, c.y, c.z);
+      if (d < bestD) {
+        bestD = d;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  public Cube byEntity(Entity e) {
+    for (Cube c : cubes) {
+      if (e.getCommandTags().contains(c.tag)) return c;
+    }
+    return null;
+  }
+
+  public void remove(MinecraftServer server, Cube c) {
+    cubes.remove(c);
+    run(server, c.world, "kill @e[tag=" + c.tag + "]");
+  }
+
+  public void removeAll(MinecraftServer server) {
+    for (Cube c : new ArrayList<>(cubes)) {
+      remove(server, c);
     }
   }
 
@@ -60,99 +112,132 @@ public class CubeCharacter {
     }
   }
 
-  public void say(ServerPlayerEntity p, String text) {
-    MinecraftServer server = p.getServer();
-    server.getPlayerManager().broadcast(Text.literal("§f<§bCubix§f> §f" + text), false);
-    Cube c = cubes.get(p.getUuid());
-    if (c != null) {
-      c.talkTicks = Math.min(240, 24 + text.length() * 2);
-    }
+  public void speak(MinecraftServer server, Cube c, String text) {
+    server.getPlayerManager().broadcast(Text.literal("§f<§c" + NAME + "§f> §f" + text), false);
+    c.talkTicks = Math.min(240, 24 + text.length() * 2);
+  }
+
+  public void say(Cube c, ServerPlayerEntity asker, String text) {
+    MinecraftServer server = asker.getServer();
+    c.yaw = Math.toDegrees(Math.atan2(-(asker.getX() - c.x), asker.getZ() - c.z));
+    run(server, c.world, "tp @e[tag=" + c.tag + "] " + f(c.x) + " " + f(c.y) + " " + f(c.z) + " " + f(c.yaw) + " 0");
+    speak(server, c, text);
+  }
+
+  public void grow(MinecraftServer server, Cube c) {
+    c.g = 2.6;
+    c.mouthOpen = false;
+    updateAll(server, c, c.lid, 80);
+    later(95, () -> speak(server, c, "I like this form."));
+    later(160, () -> speak(server, c, "I know I am asking a lot of you."));
+    later(230, () -> {
+      speak(server, c, "But you must enter my mouth.");
+      c.wide = true;
+      updateLid(server, c, -1.75, 25);
+    });
+  }
+
+  public void shrink(MinecraftServer server, Cube c) {
+    c.g = 1.0;
+    c.wide = false;
+    c.mouthOpen = false;
+    updateAll(server, c, 0.0, 50);
   }
 
   public void tick(MinecraftServer server) {
-    if (cubes.isEmpty()) return;
-    Iterator<Map.Entry<UUID, Cube>> it = cubes.entrySet().iterator();
-    while (it.hasNext()) {
-      Map.Entry<UUID, Cube> e = it.next();
-      Cube c = e.getValue();
-      ServerPlayerEntity p = server.getPlayerManager().getPlayer(e.getKey());
-      if (p == null) {
-        kill(server, c);
-        it.remove();
-        continue;
+    Iterator<Later> li = laters.iterator();
+    List<Runnable> due = new ArrayList<>();
+    while (li.hasNext()) {
+      Later l = li.next();
+      if (--l.ticks <= 0) {
+        due.add(l.action);
+        li.remove();
       }
-      if (p.isRemoved()) continue;
+    }
+    for (Runnable r : due) {
+      r.run();
+    }
 
-      if (p.getServerWorld() != c.world) {
-        kill(server, c);
-        c.world = p.getServerWorld();
-        Vec3d t = targetFor(p, c.age);
-        c.x = t.x;
-        c.y = t.y;
-        c.z = t.z;
-        summonParts(server, c);
-        continue;
-      }
-
-      c.age++;
-      if (c.age % 2 == 0) {
-        Vec3d t = targetFor(p, c.age);
-        double yaw = Math.toDegrees(Math.atan2(-(p.getX() - t.x), p.getZ() - t.z));
-        run(server, c.world, "tp @e[tag=" + c.tag + "] " + f(t.x) + " " + f(t.y) + " " + f(t.z) + " " + f(yaw) + " 0");
-        c.x = t.x;
-        c.y = t.y;
-        c.z = t.z;
-      }
-
+    for (Cube c : cubes) {
       if (c.talkTicks > 0) {
         c.talkTicks--;
+        if (c.wide) continue;
         if (c.talkTicks == 0) {
-          setMouth(server, c, false);
+          updateLid(server, c, 0.0, 3);
+          c.mouthOpen = false;
         } else if (c.talkTicks % 4 == 0) {
-          setMouth(server, c, !c.mouthOpen);
+          c.mouthOpen = !c.mouthOpen;
+          updateLid(server, c, c.mouthOpen ? -0.5 : 0.0, 3);
         }
       }
     }
   }
 
-  private Vec3d targetFor(ServerPlayerEntity p, int age) {
-    double yaw = Math.toRadians(p.getYaw());
-    double rx = -Math.cos(yaw);
-    double rz = -Math.sin(yaw);
-    double fx = -Math.sin(yaw);
-    double fz = Math.cos(yaw);
-    double bob = Math.sin(age * 0.12) * 0.12;
-    return new Vec3d(p.getX() + rx * 1.3 + fx * 0.6, p.getY() + 1.9 + bob, p.getZ() + rz * 1.3 + fz * 0.6);
+  private void later(int ticks, Runnable r) {
+    laters.add(new Later(ticks, r));
   }
 
-  private void summonParts(MinecraftServer server, Cube c) {
-    part(server, c, "p_body", "white_concrete", -0.4, -0.4, -0.4, 0.8, 0.8, 0.8);
-    part(server, c, "p_eyeL_f", "black_concrete", -0.26, -0.02, 0.395, 0.2, 0.2, 0.02);
-    part(server, c, "p_eyeR_f", "black_concrete", 0.06, -0.02, 0.395, 0.2, 0.2, 0.02);
-    part(server, c, "p_eyeL", "white_concrete", -0.235, 0.005, 0.41, 0.15, 0.15, 0.02);
-    part(server, c, "p_eyeR", "white_concrete", 0.085, 0.005, 0.41, 0.15, 0.15, 0.02);
-    part(server, c, "p_mouth", "black_concrete", -0.15, -0.18, 0.395, 0.3, 0.03, 0.02);
-    c.mouthOpen = false;
+  private void summonAll(MinecraftServer server, Cube c) {
+    summonPart(server, c, "v_base", "red_concrete", baseTf("v_base", c.g));
+    summonPart(server, c, "v_basein", "black_concrete", baseTf("v_basein", c.g));
+    for (int i = 0; i < LID_NAME.length; i++) {
+      summonPart(server, c, LID_NAME[i], LID_BLOCK[i], lidTf(LID_GEO[i], c.g, c.lid));
+    }
+    run(server, c.world, "summon minecraft:interaction " + f(c.x) + " " + f(c.y) + " " + f(c.z)
+        + " {width:" + f(0.8 * c.g) + "f,height:" + f((HB + HL) * c.g) + "f,response:1b,"
+        + "Tags:[\"korkumod_cube\",\"" + c.tag + "\",\"v_hit\"]}");
   }
 
-  private void part(MinecraftServer server, Cube c, String name, String block,
-                    double tx, double ty, double tz, double sx, double sy, double sz) {
-    String nbt = "{block_state:{Name:\"minecraft:" + block + "\"},"
+  private void summonPart(MinecraftServer server, Cube c, String name, String block, String tf) {
+    String nbt = "{block_state:{Name:\"minecraft:" + block + "\"},Rotation:[" + f(c.yaw) + "f,0f],"
         + "Tags:[\"korkumod_cube\",\"" + c.tag + "\",\"" + name + "\"],"
-        + "teleport_duration:3,brightness:{sky:15,block:15},"
-        + "transformation:" + tf(tx, ty, tz, sx, sy, sz) + "}";
+        + "teleport_duration:3,brightness:{sky:15,block:15},transformation:" + tf + "}";
     run(server, c.world, "summon minecraft:block_display " + f(c.x) + " " + f(c.y) + " " + f(c.z) + " " + nbt);
   }
 
-  private void setMouth(MinecraftServer server, Cube c, boolean open) {
-    String tr = open ? tf(-0.15, -0.28, 0.395, 0.3, 0.15, 0.02) : tf(-0.15, -0.18, 0.395, 0.3, 0.03, 0.02);
-    run(server, c.world, "data merge entity @e[tag=" + c.tag + ",tag=p_mouth,limit=1] "
-        + "{start_interpolation:0,interpolation_duration:3,transformation:" + tr + "}");
-    c.mouthOpen = open;
+  private void updateLid(MinecraftServer server, Cube c, double theta, int dur) {
+    for (int i = 0; i < LID_NAME.length; i++) {
+      merge(server, c, LID_NAME[i], lidTf(LID_GEO[i], c.g, theta), dur);
+    }
+    c.lid = theta;
   }
 
-  private void kill(MinecraftServer server, Cube c) {
-    run(server, c.world, "kill @e[tag=" + c.tag + "]");
+  private void updateAll(MinecraftServer server, Cube c, double theta, int dur) {
+    merge(server, c, "v_base", baseTf("v_base", c.g), dur);
+    merge(server, c, "v_basein", baseTf("v_basein", c.g), dur);
+    updateLid(server, c, theta, dur);
+    run(server, c.world, "data merge entity @e[tag=" + c.tag + ",tag=v_hit,limit=1] {width:"
+        + f(0.8 * c.g) + "f,height:" + f((HB + HL) * c.g) + "f}");
+  }
+
+  private void merge(MinecraftServer server, Cube c, String part, String tf, int dur) {
+    run(server, c.world, "data merge entity @e[tag=" + c.tag + ",tag=" + part + ",limit=1] "
+        + "{start_interpolation:0,interpolation_duration:" + dur + ",transformation:" + tf + "}");
+  }
+
+  private String baseTf(String part, double g) {
+    if (part.equals("v_base")) {
+      return tf(g * -0.4, 0.0, g * -0.4, g * 0.8, g * HB, g * 0.8, 0.0);
+    }
+    return tf(g * -0.34, g * (HB - 0.005), g * -0.34, g * 0.68, g * 0.02, g * 0.68, 0.0);
+  }
+
+  private String lidTf(double[] geo, double g, double theta) {
+    double cs = Math.cos(theta);
+    double sn = Math.sin(theta);
+    double ox = geo[0];
+    double oy = geo[1];
+    double oz = geo[2];
+    double ry = oy * cs - oz * sn;
+    double rz = oy * sn + oz * cs;
+    return tf(g * ox, g * (HB + ry), g * (-0.4 + rz), g * geo[3], g * geo[4], g * geo[5], theta);
+  }
+
+  private String tf(double tx, double ty, double tz, double sx, double sy, double sz, double theta) {
+    return "{translation:[" + f(tx) + "f," + f(ty) + "f," + f(tz) + "f],"
+        + "scale:[" + f(sx) + "f," + f(sy) + "f," + f(sz) + "f],"
+        + "left_rotation:[" + f(Math.sin(theta / 2)) + "f,0f,0f," + f(Math.cos(theta / 2)) + "f],"
+        + "right_rotation:[0f,0f,0f,1f]}";
   }
 
   private void run(MinecraftServer server, ServerWorld world, String cmd) {
@@ -161,13 +246,7 @@ public class CubeCharacter {
         server.getCommandSource().withSilent(), "execute in " + dim + " run " + cmd);
   }
 
-  private String tf(double tx, double ty, double tz, double sx, double sy, double sz) {
-    return "{translation:[" + f(tx) + "f," + f(ty) + "f," + f(tz) + "f],"
-        + "scale:[" + f(sx) + "f," + f(sy) + "f," + f(sz) + "f],"
-        + "left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f]}";
-  }
-
   private static String f(double v) {
-    return String.format(Locale.ROOT, "%.3f", v);
+    return String.format(Locale.ROOT, "%.4f", v);
   }
-}
+  }
