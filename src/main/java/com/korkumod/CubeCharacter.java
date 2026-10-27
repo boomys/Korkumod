@@ -6,24 +6,22 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 
 public class CubeCharacter {
-  public static final String NAME = "Vesper";
+  public static final String NAME = "Nox";
   private static final double HB = 0.3;
   private static final double HL = 0.5;
 
-  private static final String[] LID_NAME = {"v_lid", "v_lidin", "v_eyeL", "v_eyeR", "v_pupL", "v_pupR"};
-  private static final String[] LID_BLOCK = {"red_concrete", "black_concrete", "white_concrete", "white_concrete", "black_concrete", "black_concrete"};
+  private static final String[] LID_NAME = {"v_lid", "v_lidin", "v_eye", "v_pup", "v_ant"};
+  private static final String[] LID_BLOCK = {"purple_concrete", "black_concrete", "white_concrete", "black_concrete", "cyan_concrete"};
   private static final double[][] LID_GEO = {
       {-0.4, 0.0, 0.0, 0.8, HL, 0.8},
       {-0.34, -0.012, 0.06, 0.68, 0.014, 0.68},
-      {-0.3, 0.14, 0.795, 0.2, 0.28, 0.02},
-      {0.1, 0.14, 0.795, 0.2, 0.28, 0.02},
-      {-0.24, 0.18, 0.81, 0.11, 0.22, 0.02},
-      {0.16, 0.18, 0.81, 0.11, 0.22, 0.02}
+      {-0.17, 0.10, 0.795, 0.34, 0.30, 0.02},
+      {-0.08, 0.15, 0.81, 0.16, 0.20, 0.02},
+      {-0.03, 0.5, 0.37, 0.06, 0.2, 0.06}
   };
 
   public static class Cube {
@@ -49,25 +47,19 @@ public class CubeCharacter {
     }
   }
 
-  private static class Later {
-    int ticks;
-    final Runnable action;
-
-    Later(int ticks, Runnable action) {
-      this.ticks = ticks;
-      this.action = action;
-    }
-  }
-
   private final List<Cube> cubes = new ArrayList<>();
-  private final List<Later> laters = new ArrayList<>();
+  private final CubeTimer timer = new CubeTimer();
   private int counter = 0;
+
+  public List<Cube> all() {
+    return cubes;
+  }
 
   public Cube place(ServerPlayerEntity p, double x, double y, double z) {
     MinecraftServer server = p.getServer();
     double yaw = Math.toDegrees(Math.atan2(-(p.getX() - x), p.getZ() - z));
     counter++;
-    Cube c = new Cube("vesper_" + counter + "_" + (System.currentTimeMillis() % 100000), p.getServerWorld(), x, y, z, yaw);
+    Cube c = new Cube("nox_" + counter + "_" + (System.currentTimeMillis() % 100000), p.getServerWorld(), x, y, z, yaw);
     summonAll(server, c);
     cubes.add(c);
     run(server, c.world, "particle minecraft:poof " + f(x) + " " + f(y + 0.4) + " " + f(z) + " 0.3 0.3 0.3 0.05 25 normal");
@@ -113,7 +105,7 @@ public class CubeCharacter {
   }
 
   public void speak(MinecraftServer server, Cube c, String text) {
-    server.getPlayerManager().broadcast(Text.literal("§f<§c" + NAME + "§f> §f" + text), false);
+    server.getPlayerManager().broadcast(Text.literal("§f<§d" + NAME + "§f> §f" + text), false);
     c.talkTicks = Math.min(240, 24 + text.length() * 2);
   }
 
@@ -125,12 +117,13 @@ public class CubeCharacter {
   }
 
   public void grow(MinecraftServer server, Cube c) {
+    if (c.wide || c.g > 1.5) return;
     c.g = 2.6;
     c.mouthOpen = false;
     updateAll(server, c, c.lid, 80);
-    later(95, () -> speak(server, c, "I like this form."));
-    later(160, () -> speak(server, c, "I know I am asking a lot of you."));
-    later(230, () -> {
+    timer.later(95, () -> speak(server, c, "I like this form."));
+    timer.later(160, () -> speak(server, c, "I know I am asking a lot of you."));
+    timer.later(230, () -> {
       speak(server, c, "But you must enter my mouth.");
       c.wide = true;
       updateLid(server, c, -1.75, 25);
@@ -144,20 +137,41 @@ public class CubeCharacter {
     updateAll(server, c, 0.0, 50);
   }
 
-  public void tick(MinecraftServer server) {
-    Iterator<Later> li = laters.iterator();
-    List<Runnable> due = new ArrayList<>();
-    while (li.hasNext()) {
-      Later l = li.next();
-      if (--l.ticks <= 0) {
-        due.add(l.action);
-        li.remove();
-      }
-    }
-    for (Runnable r : due) {
-      r.run();
-    }
+  public void pulse(MinecraftServer server, Cube c) {
+    if (c.wide) return;
+    c.mouthOpen = !c.mouthOpen;
+    updateLid(server, c, c.mouthOpen ? -0.6 : 0.0, 4);
+  }
 
+  public void spit(MinecraftServer server, Cube c, ServerPlayerEntity target, String itemId, int count) {
+    if (!c.wide) updateLid(server, c, -0.9, 6);
+    timer.later(8, () -> {
+      double yr = Math.toRadians(c.yaw);
+      double mx = c.x - Math.sin(yr) * 0.5 * c.g;
+      double my = c.y + 0.45 * c.g;
+      double mz = c.z + Math.cos(yr) * 0.5 * c.g;
+      double tx = target.getX() - mx;
+      double tz = target.getZ() - mz;
+      double len = Math.sqrt(tx * tx + tz * tz);
+      if (len < 0.01) len = 1.0;
+      run(server, c.world, "summon minecraft:item " + f(mx) + " " + f(my) + " " + f(mz)
+          + " {Item:{id:\"minecraft:" + itemId + "\",count:" + count + "},Motion:["
+          + f(tx / len * 0.28) + "d,0.28d," + f(tz / len * 0.28) + "d],PickupDelay:20s}");
+      run(server, c.world, "playsound minecraft:entity.llama.spit master @a " + f(mx) + " " + f(my) + " " + f(mz) + " 1.5 0.7");
+    });
+    timer.later(26, () -> {
+      if (!c.wide) updateLid(server, c, 0.0, 6);
+    });
+  }
+
+  public void reward(MinecraftServer server, Cube c, ServerPlayerEntity target) {
+    timer.later(30, () -> spit(server, c, target, "diamond", 3));
+    timer.later(70, () -> spit(server, c, target, "emerald", 4));
+    timer.later(110, () -> spit(server, c, target, "cooked_beef", 8));
+  }
+
+  public void tick(MinecraftServer server) {
+    timer.tick();
     for (Cube c : cubes) {
       if (c.talkTicks > 0) {
         c.talkTicks--;
@@ -173,12 +187,8 @@ public class CubeCharacter {
     }
   }
 
-  private void later(int ticks, Runnable r) {
-    laters.add(new Later(ticks, r));
-  }
-
   private void summonAll(MinecraftServer server, Cube c) {
-    summonPart(server, c, "v_base", "red_concrete", baseTf("v_base", c.g));
+    summonPart(server, c, "v_base", "purple_concrete", baseTf("v_base", c.g));
     summonPart(server, c, "v_basein", "black_concrete", baseTf("v_basein", c.g));
     for (int i = 0; i < LID_NAME.length; i++) {
       summonPart(server, c, LID_NAME[i], LID_BLOCK[i], lidTf(LID_GEO[i], c.g, c.lid));
@@ -225,12 +235,9 @@ public class CubeCharacter {
   private String lidTf(double[] geo, double g, double theta) {
     double cs = Math.cos(theta);
     double sn = Math.sin(theta);
-    double ox = geo[0];
-    double oy = geo[1];
-    double oz = geo[2];
-    double ry = oy * cs - oz * sn;
-    double rz = oy * sn + oz * cs;
-    return tf(g * ox, g * (HB + ry), g * (-0.4 + rz), g * geo[3], g * geo[4], g * geo[5], theta);
+    double ry = geo[1] * cs - geo[2] * sn;
+    double rz = geo[1] * sn + geo[2] * cs;
+    return tf(g * geo[0], g * (HB + ry), g * (-0.4 + rz), g * geo[3], g * geo[4], g * geo[5], theta);
   }
 
   private String tf(double tx, double ty, double tz, double sx, double sy, double sz, double theta) {
@@ -249,4 +256,4 @@ public class CubeCharacter {
   private static String f(double v) {
     return String.format(Locale.ROOT, "%.4f", v);
   }
-  }
+}
